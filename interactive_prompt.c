@@ -5,10 +5,10 @@
 
 
 int main(int argc,char** argv){
-  puts("Lispy version 0.0.0.0.1");
+  puts("Spython version 0.0.0.0.1");
   puts("Press Ctrl+c to Exit\n");
   while(1){
-    char *input=readline("lispy> ");
+    char *input=readline("spython> ");
 
     add_history(input);
 
