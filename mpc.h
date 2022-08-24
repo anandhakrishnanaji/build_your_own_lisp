@@ -10,6 +10,10 @@
 #ifndef mpc_h
 #define mpc_h
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -26,6 +30,7 @@ typedef struct {
   long pos;
   long row;
   long col;
+  int term;
 } mpc_state_t;
 
 /*
@@ -61,6 +66,7 @@ struct mpc_parser_t;
 typedef struct mpc_parser_t mpc_parser_t;
 
 int mpc_parse(const char *filename, const char *string, mpc_parser_t *p, mpc_result_t *r);
+int mpc_nparse(const char *filename, const char *string, size_t length, mpc_parser_t *p, mpc_result_t *r);
 int mpc_parse_file(const char *filename, FILE *file, mpc_parser_t *p, mpc_result_t *r);
 int mpc_parse_pipe(const char *filename, FILE *pipe, mpc_parser_t *p, mpc_result_t *r);
 int mpc_parse_contents(const char *filename, mpc_parser_t *p, mpc_result_t *r);
@@ -76,11 +82,15 @@ typedef mpc_val_t*(*mpc_apply_t)(mpc_val_t*);
 typedef mpc_val_t*(*mpc_apply_to_t)(mpc_val_t*,void*);
 typedef mpc_val_t*(*mpc_fold_t)(int,mpc_val_t**);
 
+typedef int(*mpc_check_t)(mpc_val_t**);
+typedef int(*mpc_check_with_t)(mpc_val_t**,void*);
+
 /*
 ** Building a Parser
 */
 
 mpc_parser_t *mpc_new(const char *name);
+mpc_parser_t *mpc_copy(mpc_parser_t *a);
 mpc_parser_t *mpc_define(mpc_parser_t *p, mpc_parser_t *a);
 mpc_parser_t *mpc_undefine(mpc_parser_t *p);
 
@@ -119,6 +129,10 @@ mpc_parser_t *mpc_expect(mpc_parser_t *a, const char *e);
 mpc_parser_t *mpc_expectf(mpc_parser_t *a, const char *fmt, ...);
 mpc_parser_t *mpc_apply(mpc_parser_t *a, mpc_apply_t f);
 mpc_parser_t *mpc_apply_to(mpc_parser_t *a, mpc_apply_to_t f, void *x);
+mpc_parser_t *mpc_check(mpc_parser_t *a, mpc_check_t f, const char *e);
+mpc_parser_t *mpc_check_with(mpc_parser_t *a, mpc_check_with_t f, void *x, const char *e);
+mpc_parser_t *mpc_checkf(mpc_parser_t *a, mpc_check_t f, const char *fmt, ...);
+mpc_parser_t *mpc_check_withf(mpc_parser_t *a, mpc_check_with_t f, void *x, const char *fmt, ...);
 
 mpc_parser_t *mpc_not(mpc_parser_t *a, mpc_dtor_t da);
 mpc_parser_t *mpc_not_lift(mpc_parser_t *a, mpc_dtor_t da, mpc_ctor_t lf);
@@ -142,6 +156,7 @@ mpc_parser_t *mpc_eoi(void);
 mpc_parser_t *mpc_soi(void);
 
 mpc_parser_t *mpc_boundary(void);
+mpc_parser_t *mpc_boundary_newline(void);
 
 mpc_parser_t *mpc_whitespace(void);
 mpc_parser_t *mpc_whitespaces(void);
@@ -241,6 +256,7 @@ mpc_val_t *mpcf_trd(int n, mpc_val_t** xs);
 mpc_val_t *mpcf_fst_free(int n, mpc_val_t** xs);
 mpc_val_t *mpcf_snd_free(int n, mpc_val_t** xs);
 mpc_val_t *mpcf_trd_free(int n, mpc_val_t** xs);
+mpc_val_t *mpcf_all_free(int n, mpc_val_t** xs);
 
 mpc_val_t *mpcf_strfold(int n, mpc_val_t** xs);
 mpc_val_t *mpcf_maths(int n, mpc_val_t** xs);
@@ -249,7 +265,16 @@ mpc_val_t *mpcf_maths(int n, mpc_val_t** xs);
 ** Regular Expression Parsers
 */
 
+enum {
+  MPC_RE_DEFAULT   = 0,
+  MPC_RE_M         = 1,
+  MPC_RE_S         = 2,
+  MPC_RE_MULTILINE = 1,
+  MPC_RE_DOTALL    = 2
+};
+
 mpc_parser_t *mpc_re(const char *re);
+mpc_parser_t *mpc_re_mode(const char *re, int mode);
   
 /*
 ** AST
@@ -268,12 +293,37 @@ mpc_ast_t *mpc_ast_build(int n, const char *tag, ...);
 mpc_ast_t *mpc_ast_add_root(mpc_ast_t *a);
 mpc_ast_t *mpc_ast_add_child(mpc_ast_t *r, mpc_ast_t *a);
 mpc_ast_t *mpc_ast_add_tag(mpc_ast_t *a, const char *t);
+mpc_ast_t *mpc_ast_add_root_tag(mpc_ast_t *a, const char *t);
 mpc_ast_t *mpc_ast_tag(mpc_ast_t *a, const char *t);
 mpc_ast_t *mpc_ast_state(mpc_ast_t *a, mpc_state_t s);
 
 void mpc_ast_delete(mpc_ast_t *a);
 void mpc_ast_print(mpc_ast_t *a);
 void mpc_ast_print_to(mpc_ast_t *a, FILE *fp);
+
+int mpc_ast_get_index(mpc_ast_t *ast, const char *tag);
+int mpc_ast_get_index_lb(mpc_ast_t *ast, const char *tag, int lb);
+mpc_ast_t *mpc_ast_get_child(mpc_ast_t *ast, const char *tag);
+mpc_ast_t *mpc_ast_get_child_lb(mpc_ast_t *ast, const char *tag, int lb);
+
+typedef enum {
+  mpc_ast_trav_order_pre,
+  mpc_ast_trav_order_post
+} mpc_ast_trav_order_t;
+
+typedef struct mpc_ast_trav_t {
+  mpc_ast_t             *curr_node;
+  struct mpc_ast_trav_t *parent;
+  int                    curr_child;
+  mpc_ast_trav_order_t   order;
+} mpc_ast_trav_t;
+
+mpc_ast_trav_t *mpc_ast_traverse_start(mpc_ast_t *ast,
+                                       mpc_ast_trav_order_t order);
+
+mpc_ast_t *mpc_ast_traverse_next(mpc_ast_trav_t **trav);
+
+void mpc_ast_traverse_free(mpc_ast_trav_t **trav);
 
 /*
 ** Warning: This function currently doesn't test for equality of the `state` member!
@@ -314,10 +364,13 @@ mpc_err_t *mpca_lang_pipe(int flags, FILE *f, ...);
 mpc_err_t *mpca_lang_contents(int flags, const char *filename, ...);
 
 /*
-** Debug & Testing
+** Misc
 */
 
+
 void mpc_print(mpc_parser_t *p);
+void mpc_optimise(mpc_parser_t *p);
+void mpc_stats(mpc_parser_t *p);
 
 int mpc_test_pass(mpc_parser_t *p, const char *s, const void *d,
   int(*tester)(const void*, const void*), 
@@ -329,6 +382,8 @@ int mpc_test_fail(mpc_parser_t *p, const char *s, const void *d,
   mpc_dtor_t destructor,
   void(*printer)(const void*));
 
-
+#ifdef __cplusplus
+}
+#endif
 
 #endif
